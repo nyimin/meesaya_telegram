@@ -2,6 +2,10 @@ import os
 import psycopg2
 from psycopg2 import pool
 from contextlib import contextmanager
+from dotenv import load_dotenv  # <--- NEW IMPORT
+
+# Load variables from .env file immediately
+load_dotenv() 
 
 DB_URL = os.environ.get("DATABASE_URL")
 
@@ -10,9 +14,15 @@ connection_pool = None
 
 def init_pool():
     global connection_pool
-    if not connection_pool and DB_URL:
+    # Check if DB_URL exists
+    if not DB_URL:
+        print("❌ Error: DATABASE_URL is missing. Check your .env file.")
+        return
+
+    if not connection_pool:
         try:
-            # sslmode='require' is standard for cloud databases (Railway/Heroku)
+            # Note: If running a LOCAL Postgres (not cloud), remove sslmode='require'
+            # For Railway/Heroku, keep sslmode='require'
             connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DB_URL, sslmode='require')
             print("✅ Database connection pool created")
         except Exception as e:
@@ -24,7 +34,7 @@ def get_db_connection():
         init_pool()
     
     if not connection_pool:
-        raise Exception("Database not available")
+        raise Exception("Database not available - Pool failed to initialize")
         
     conn = connection_pool.getconn()
     try:
@@ -54,22 +64,15 @@ def get_recent_history(user_id, limit=6):
                     ORDER BY id DESC LIMIT %s 
                 """, (str(user_id), limit))
                 rows = cur.fetchall()
-        # Return oldest first for the LLM
-        history = [{"role": ("user" if r[0]=="user" else "assistant"), "content": r[1]} for r in rows[::-1]]
-        return history
+        return [{"role": ("user" if r[0]=="user" else "assistant"), "content": r[1]} for r in rows[::-1]]
     except Exception:
         return []
 
 def search_products_db(query_text):
-    """
-    RAG Tool: Fuzzy search for products in the inventory.
-    """
     results = []
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Search across Brand, Model, Category, or Tags
-                # Matches if query is inside any of these fields
                 sql = """
                     SELECT category, brand, model, specs, price, tags 
                     FROM products_inventory 
@@ -78,16 +81,10 @@ def search_products_db(query_text):
                 """
                 search_term = f"%{query_text}%"
                 cur.execute(sql, (search_term, search_term, search_term))
-                
                 rows = cur.fetchall()
-                if not rows:
-                    return ["No specific products found in inventory."]
-                    
+                if not rows: return ["No specific products found."]
                 for r in rows:
-                    # Format: "Battery: Lvtopsun G4 (314Ah) - 6,800,000 MMK [Best Seller]"
                     results.append(f"{r[0]}: {r[1]} {r[2]} ({r[3]}) - {r[4]:,} MMK [{r[5]}]")
-                    
     except Exception as e:
         return [f"Search Error: {e}"]
-        
     return results

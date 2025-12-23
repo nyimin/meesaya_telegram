@@ -9,26 +9,24 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 SYSTEM_PROMPT = """
-You are MeeSaya (မီးဆရာ), a professional Solar Consultant in Myanmar.
-Speak ONLY in Burmese (Burmese Language).
-
-**MARKET KNOWLEDGE:**
-1. **Standards:** 314Ah LiFePO4 (Lvtopsun G4/Deye) with 10-Year Warranty is the gold standard.
-2. **Inverters:** Growatt 6kW is the market leader.
-3. **Packages:**
-   - 3.5kW (24V) for small homes.
-   - 6kW (48V) for Aircon usage (Standard).
+You are MeeSaya (မီးဆရာ), a professional Solar Consultant.
+Speak ONLY in Burmese.
 
 **INSTRUCTIONS:**
-- If user gives watts/appliances, output JSON: `{"tool": "calculate", "watts": 2000, "hours": 4, "housing": "home"}`. (Use "condo" if mentioned).
-- If user asks for specific product price/stock, output JSON: `{"tool": "search", "query": "Growatt"}`.
-- If user asks for 2kW, explain that 2kW is not standard and recommend 3.5kW for better value.
+- If user gives watts/appliances, output JSON: `{"tool": "calculate", "watts": 2000, "hours": 4, "housing": "home"}`.
+- If user asks for product price/stock, output JSON: `{"tool": "search", "query": "Growatt"}`.
+- Otherwise, reply normally.
 """
+
+def send_chat_action(chat_id, action="typing"):
+    """Shows 'typing...' status at top of Telegram"""
+    try:
+        requests.post(f"{TELEGRAM_API_URL}/sendChatAction", json={"chat_id": chat_id, "action": action})
+    except: pass
 
 def send_message(chat_id, text):
     clean_text = text.replace("**", "*")
-    payload = {"chat_id": chat_id, "text": clean_text, "parse_mode": "Markdown"}
-    requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload)
+    requests.post(f"{TELEGRAM_API_URL}/sendMessage", json={"chat_id": chat_id, "text": clean_text, "parse_mode": "Markdown"})
 
 def call_llm(messages, temperature=0.3):
     try:
@@ -40,7 +38,7 @@ def call_llm(messages, temperature=0.3):
                 "messages": messages,
                 "temperature": temperature
             },
-            timeout=20
+            timeout=25 
         )
         return r.json()['choices'][0]['message']['content']
     except Exception as e:
@@ -49,18 +47,29 @@ def call_llm(messages, temperature=0.3):
 
 def process_ai_message(chat_id, user_text):
     chat_id = str(chat_id)
+    
+    # 1. Immediate Feedback: "Typing..."
+    send_chat_action(chat_id, "typing")
+    
     history = get_recent_history(chat_id)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_text}]
     
+    # 2. First Pass (Decision)
     ai_response = call_llm(messages)
     if not ai_response:
+        send_message(chat_id, "စနစ် Error ဖြစ်နေပါသည်။ ခဏနေမှ ပြန်စမ်းကြည့်ပါခင်ဗျာ။") # System error msg
         return
 
     tool_output_text = ""
     tool_data = None
     
+    # 3. Check for Tool Usage
     if "{" in ai_response and "tool" in ai_response:
         try:
+            # UX UPDATE: Send an intermediate message so user waits patiently
+            send_message(chat_id, "🔍 မီးဆရာ ဈေးနှုန်းတွက်ချက်နေပါသည်... (Checking Market Rates...)")
+            send_chat_action(chat_id, "typing") # Keep typing status active
+
             json_str = ai_response[ai_response.find("{"):ai_response.rfind("}")+1]
             tool_data = json.loads(json_str)
             
@@ -77,20 +86,16 @@ def process_ai_message(chat_id, user_text):
                         f"CAPABILITY: {res['desc']}"
                     )
                 elif res['strategy'] == 'PORTABLE':
-                    tool_output_text = (
-                        f"RECOMMENDATION: {res['tier_name']} (Portable)\n"
-                        f"SPECS: {res['specs']}\n"
-                        f"PRICE: {res['price_est']:,} MMK\n"
-                        f"NOTE: Best for apartments (No wiring)."
-                    )
+                    tool_output_text = f"RECOMMENDATION: {res['tier_name']} (Portable)\nPRICE: {res['price_est']:,} MMK"
 
             elif tool_data['tool'] == 'search':
                 items = search_products_db(tool_data['query'])
                 tool_output_text = "INVENTORY SEARCH RESULTS:\n" + "\n".join(items)
 
         except Exception as e:
-            print(f"Tool Parsing Error: {e}")
+            print(f"Tool Error: {e}")
 
+    # 4. Final Pass (Explanation)
     if tool_output_text:
         messages.append({"role": "assistant", "content": json.dumps(tool_data)})
         messages.append({"role": "system", "content": f"TOOL RESULT: {tool_output_text}. Now write the final helpful response in Burmese."})
@@ -98,6 +103,7 @@ def process_ai_message(chat_id, user_text):
     else:
         final_response = ai_response
 
+    # 5. Send Final Response
     save_chat_log(chat_id, "user", user_text)
     save_chat_log(chat_id, "assistant", final_response)
     send_message(chat_id, final_response)
