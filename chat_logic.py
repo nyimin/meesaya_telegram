@@ -31,7 +31,7 @@ def send_message(chat_id, text):
 def call_llm(messages, temperature=0.3):
     try:
         # Use stable model version 1.5
-        model = "google/gemini-flash-1.5" 
+        model = "google/gemini-2.0-flash-exp:free" 
         
         r = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
