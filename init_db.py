@@ -3,30 +3,29 @@ import psycopg2
 from psycopg2 import pool
 from contextlib import contextmanager
 
-# Get URL
 DB_URL = os.environ.get("DATABASE_URL")
 
-# Initialize Connection Pool
+# Singleton Connection Pool
 connection_pool = None
-try:
-    if DB_URL:
-        # Added sslmode='require' for secure production connection
-        connection_pool = psycopg2.pool.SimpleConnectionPool(
-            1, 10, DB_URL, sslmode='require'
-        )
-        print("✅ Database connection pool created successfully")
-    else:
-        print("❌ DATABASE_URL not found in environment.")
-except Exception as e:
-    print(f"❌ Error creating connection pool: {e}")
+
+def init_pool():
+    global connection_pool
+    if not connection_pool and DB_URL:
+        try:
+            # sslmode='require' is standard for cloud databases (Railway/Heroku)
+            connection_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DB_URL, sslmode='require')
+            print("✅ Database connection pool created")
+        except Exception as e:
+            print(f"❌ DB Connection Error: {e}")
 
 @contextmanager
 def get_db_connection():
-    """Yields a connection from the pool and ensures it's returned."""
     if not connection_pool:
-        # Fail gracefully if DB isn't connected
-        raise Exception("Database connection pool is not initialized.")
+        init_pool()
     
+    if not connection_pool:
+        raise Exception("Database not available")
+        
     conn = connection_pool.getconn()
     try:
         yield conn
@@ -35,35 +34,59 @@ def get_db_connection():
 
 def save_chat_log(user_id, role, message):
     try:
-        user_id = str(user_id)
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO chat_history (user_id, role, message_text) VALUES (%s, %s, %s)",
-                    (user_id, role, message)
+                    (str(user_id), role, message)
                 )
             conn.commit()
     except Exception as e:
-        print(f"Failed to save chat log: {e}")
+        print(f"Log Error: {e}")
 
-def get_recent_history(user_id, limit=10):
+def get_recent_history(user_id, limit=6):
     try:
-        user_id = str(user_id)
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT role, message_text FROM chat_history
                     WHERE user_id = %s
-                    ORDER BY timestamp DESC LIMIT %s
-                """, (user_id, limit))
+                    ORDER BY id DESC LIMIT %s 
+                """, (str(user_id), limit))
                 rows = cur.fetchall()
-        
-        history = []
-        for row in rows[::-1]:
-            role = "user" if row[0] == "user" else "assistant"
-            history.append({"role": role, "content": row[1]})
-            
+        # Return oldest first for the LLM
+        history = [{"role": ("user" if r[0]=="user" else "assistant"), "content": r[1]} for r in rows[::-1]]
         return history
-    except Exception as e:
-        print(f"Error fetching history: {e}")
+    except Exception:
         return []
+
+def search_products_db(query_text):
+    """
+    RAG Tool: Fuzzy search for products in the inventory.
+    """
+    results = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Search across Brand, Model, Category, or Tags
+                sql = """
+                    SELECT category, brand, model, specs, price, tags 
+                    FROM products_inventory 
+                    WHERE brand ILIKE %s OR model ILIKE %s OR category ILIKE %s
+                    LIMIT 4
+                """
+                search_term = f"%{query_text}%"
+                cur.execute(sql, (search_term, search_term, search_term))
+                
+                rows = cur.fetchall()
+                if not rows:
+                    return ["No specific products found in inventory."]
+                    
+                for r in rows:
+                    # Format: "Battery: Lvtopsun G4 (314Ah) - 6,800,000 MMK [Best Seller]"
+                    results.append(f"{r[0]}: {r[1]} {r[2]} ({r[3]}) - {r[4]:,} MMK [{r[5]}]")
+                    
+    except Exception as e:
+        return [f"Search Error: {e}"]
+        
+    return results
