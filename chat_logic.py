@@ -30,25 +30,44 @@ def send_message(chat_id, text):
 
 def call_llm(messages, temperature=0.3):
     try:
+        # Use stable model version 1.5
+        model = "google/gemini-flash-1.5" 
+        
         r = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            },
             json={
-                "model": "google/gemini-2.0-flash-001", 
+                "model": model, 
                 "messages": messages,
                 "temperature": temperature
             },
-            timeout=25 
+            timeout=30 
         )
-        return r.json()['choices'][0]['message']['content']
+        
+        # DEBUG: Print exact error if not 200 OK
+        if r.status_code != 200:
+            print(f"❌ OpenRouter API Error ({r.status_code}): {r.text}")
+            return None
+
+        result = r.json()
+        
+        if 'choices' not in result:
+            print(f"❌ Invalid LLM Response: {result}")
+            return None
+            
+        return result['choices'][0]['message']['content']
+        
     except Exception as e:
-        print(f"LLM Error: {e}")
+        print(f"❌ Connection Error: {e}")
         return None
 
 def process_ai_message(chat_id, user_text):
     chat_id = str(chat_id)
     
-    # 1. Immediate Feedback: "Typing..."
+    # 1. Immediate Feedback
     send_chat_action(chat_id, "typing")
     
     history = get_recent_history(chat_id)
@@ -56,8 +75,10 @@ def process_ai_message(chat_id, user_text):
     
     # 2. First Pass (Decision)
     ai_response = call_llm(messages)
+    
     if not ai_response:
-        send_message(chat_id, "စနစ် Error ဖြစ်နေပါသည်။ ခဏနေမှ ပြန်စမ်းကြည့်ပါခင်ဗျာ။") # System error msg
+        # Fallback message so user isn't ignored
+        send_message(chat_id, "System Error (AI Model). Please try again later.")
         return
 
     tool_output_text = ""
@@ -66,9 +87,9 @@ def process_ai_message(chat_id, user_text):
     # 3. Check for Tool Usage
     if "{" in ai_response and "tool" in ai_response:
         try:
-            # UX UPDATE: Send an intermediate message so user waits patiently
-            send_message(chat_id, "🔍 မီးဆရာ ဈေးနှုန်းတွက်ချက်နေပါသည်... (Checking Market Rates...)")
-            send_chat_action(chat_id, "typing") # Keep typing status active
+            # Tell user we are working on it
+            send_message(chat_id, "🔍 တွက်ချက်နေပါသည်... (Calculating...)")
+            send_chat_action(chat_id, "typing")
 
             json_str = ai_response[ai_response.find("{"):ai_response.rfind("}")+1]
             tool_data = json.loads(json_str)
@@ -100,6 +121,10 @@ def process_ai_message(chat_id, user_text):
         messages.append({"role": "assistant", "content": json.dumps(tool_data)})
         messages.append({"role": "system", "content": f"TOOL RESULT: {tool_output_text}. Now write the final helpful response in Burmese."})
         final_response = call_llm(messages, temperature=0.6)
+        
+        # Fallback if second call fails
+        if not final_response:
+            final_response = "Calculation done, but I couldn't translate the result. \n" + tool_output_text
     else:
         final_response = ai_response
 
