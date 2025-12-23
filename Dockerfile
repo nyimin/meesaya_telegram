@@ -8,6 +8,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# Railway provides the PORT environment variable
+ENV PORT=8000
+EXPOSE $PORT
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 1. Initialize DB (Create tables/Seed data)
+# 2. Start Server on the correct PORT
+CMD sh -c "python init_db.py && uvicorn main:app --host 0.0.0.0 --port ${PORT}"
