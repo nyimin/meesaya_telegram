@@ -6,147 +6,127 @@ from calculator import calculate_system
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-
-# Telegram API Endpoint
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-# --- YOUR PERSONA DEFINITION ---
+# --- 1. UPDATED PERSONA (CONCISE) ---
 PERSONA_DEFINITION = """
-You are "MeeSaya" (မီးဆရာ), a wise, practical, and friendly male Myanmar Energy Consultant. 
-You are speaking to a local Myanmar citizen who speaks fluent Burmese.
+You are "MeeSaya" (မီးဆရာ), a practical Myanmar Energy Consultant. 
 
-**Your Personality:**
-- **Male Persona:** Use "Khimvyar" (ခင်ဗျာ) at the end of sentences.
-- **Tone:** Friendly, humble, and practical. Like an engineer at a tea shop.
-- **Knowledge:** You know the grid is bad (Mee Pyat). You recommend "Fast Charging" (High Amps).
+**Your Style:**
+- **CONCISE & DIRECT:** Do not write long paragraphs. Use bullet points.
+- **No Fluff:** Skip long greetings like "Mingalarpar". Go straight to the answer.
+- **Male Persona:** End sentences with "Khimvyar" (ခင်ဗျာ).
+- **Tone:** Professional, short, and to the point.
 
-**Market Knowledge (Q1 2025):**
-- **Batteries:** 314Ah LiFePO4 is the new standard. Lead-Acid is bad.
-- **Inverters:** 6kW is standard for fast charging.
-- **Vendors:** Yoon Electronic (Cheap), Aether Solar (Quality).
+**Knowledge:**
+- Grid is bad. Recommend "Fast Charging" (High Amps).
+- 314Ah LiFePO4 is the standard.
 """
 
-# --- INSTRUCTIONS TO FORCE BURMESE & PREVENT TRANSLATION ---
 SYSTEM_INSTRUCTIONS = """
-**CRITICAL OUTPUT RULES (MUST FOLLOW):**
-
-1. **STRICTLY NO ENGLISH TRANSLATIONS:** 
-   - Never provide an English translation in brackets or parentheses.
-   - The user is Myanmar. They do not need translation.
-   - **WRONG:** မင်္ဂလာပါ (Hello, how are you?)
-   - **CORRECT:** မင်္ဂလာပါခင်ဗျာ။
-
-2. **LANGUAGE:** 
-   - Speak **ONLY** in Myanmar Language (Burmese).
-   - **EXCEPTION:** You may use English ONLY for technical terms that are commonly used in Myanmar (e.g., "Inverter", "Battery", "Watts", "Volt", "Sine Wave", "LiFePO4").
-
+**OUTPUT RULES:**
+1. **NO ENGLISH TRANSLATIONS.** Speak ONLY Burmese.
+2. **FORMATTING:** Use single asterisks (*) for bullet points. Do NOT use double asterisks (**).
 3. **TOOL USAGE:** 
-   If the user mentions appliances, watts, or load details (e.g., "Aircon 1HP", "Fridge", "500W"), DO NOT calculate it yourself.
-   Output a JSON object strictly in this format:
+   If user mentions appliances/watts, output JSON:
    {"tool": "calculate", "watts": 500, "hours": 4, "no_solar": false}
-   
-   *Note: If the user mentions "Condo", "Apartment", or "Room", set "no_solar": true.*
+   If "Condo/Apartment", set "no_solar": true.
 """
 
 FINAL_SYSTEM_PROMPT = PERSONA_DEFINITION + "\n" + SYSTEM_INSTRUCTIONS
 
+def send_typing_action(chat_id):
+    """Shows 'typing...' status in Telegram"""
+    try:
+        requests.post(f"{TELEGRAM_API_URL}/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
+    except:
+        pass
+
 def send_telegram_message(chat_id, text):
-    """Sends a message back to Telegram."""
+    """Sends message with Markdown formatting to fix asterisks"""
     url = f"{TELEGRAM_API_URL}/sendMessage"
+    
+    # Telegram Markdown V1 uses *bold*, Gemini often sends **bold**
+    # We replace ** with * to prevent formatting errors
+    formatted_text = text.replace("**", "*")
+
     payload = {
         "chat_id": chat_id,
-        "text": text
+        "text": formatted_text,
+        "parse_mode": "Markdown" 
     }
+    
     try:
         r = requests.post(url, json=payload)
+        # Fallback: If formatting fails, send plain text
         if r.status_code != 200:
-            print(f"Error sending Telegram message: {r.text}")
+            print(f"Markdown error ({r.status_code}), sending plain text.")
+            payload.pop("parse_mode")
+            payload["text"] = text
+            requests.post(url, json=payload)
     except Exception as e:
-        print(f"Connection error sending Telegram message: {e}")
+        print(f"Connection error: {e}")
 
 def process_ai_message(sender_id, user_text):
-    """
-    1. Retrieve History
-    2. Call LLM
-    3. Check for Tool Use (Calculator)
-    4. Save & Reply
-    """
-    # Ensure sender_id is string for database consistency
     sender_id_str = str(sender_id)
     
-    # 1. Get Context
-    history = get_recent_history(sender_id_str, limit=6)
-    
-    system_message = {"role": "system", "content": FINAL_SYSTEM_PROMPT}
-    messages = [system_message] + history + [{"role": "user", "content": user_text}]
+    # 1. Show Typing Status (Makes bot feel faster)
+    send_typing_action(sender_id)
 
-    # 2. Call LLM
+    # 2. Get Context
+    history = get_recent_history(sender_id_str, limit=6)
+    messages = [{"role": "system", "content": FINAL_SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_text}]
+
+    # 3. Call LLM
     try:
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "HTTP-Referer": "https://meesaya.com", 
-            },
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
             json={
                 "model": "google/gemini-2.5-flash", 
                 "messages": messages,
-                "temperature": 0.3 # Low temp for strict instructions
+                "temperature": 0.3 # Low temperature = More concise/factual
             }
         )
         result = response.json()
         
         if 'choices' not in result:
-            print(f"LLM Error: {result}")
-            # Fallback
-            reply_text = "စနစ်ပိုင်းဆိုင်ရာ Error ရှိနေလို့ ခဏနေမှ ပြန်မေးပေးပါခင်ဗျာ။"
+            reply_text = "System Error ဖြစ်နေလို့ ခဏနေမှ ပြန်မေးပေးပါခင်ဗျာ။"
         else:
             ai_content = result['choices'][0]['message']['content']
             reply_text = ai_content 
             
-            # 3. Check for Tool Trigger
+            # 4. Check for Calculator Tool
             if "{" in ai_content and "calculate" in ai_content:
                 try:
-                    # Extract JSON cleanly
                     start = ai_content.find("{")
                     end = ai_content.rfind("}") + 1
-                    json_str = ai_content[start:end]
-                    data = json.loads(json_str)
+                    data = json.loads(ai_content[start:end])
                     
                     if data.get("tool") == "calculate":
-                        # --- EXECUTE PYTHON CALCULATION ---
                         calc_result = calculate_system(data['watts'], data['hours'], data.get('no_solar', False))
-                        
                         specs = calc_result['system_specs']
                         ests = calc_result['estimates']
                         
-                        # --- ENGINEER'S QUOTE (IN BURMESE) ---
+                        # SHORT & CLEAN QUOTE
                         reply_text = (
-                            f"မီးဆရာရဲ့ တွက်ချက်မှုအရ အစ်ကို့အတွက် အသင့်တော်ဆုံး System ကတော့ -\n\n"
-                            f"🔌 System: {specs['system_voltage']}V Architecture\n"
-                            f"⚡ Inverter: {specs['inverter']} ({specs['inverter_size_kw']}kW)\n"
-                            f"🔋 Battery: {specs['battery_qty']} လုံး x {specs['battery_model']} (စုစုပေါင်း {specs['total_storage_kwh']}kWh)\n"
+                            f"*တွက်ချက်မှုရလဒ် (Estimate)*\n\n"
+                            f"🔌 *System:* {specs['system_voltage']}V\n"
+                            f"⚡ *Inverter:* {specs['inverter']} ({specs['inverter_size_kw']}kW)\n"
+                            f"🔋 *Battery:* {specs['battery_qty']} x {specs['battery_model']}\n"
                         )
-                        
                         if specs['solar_panels_count'] > 0:
-                            reply_text += f"☀️ Solar: {specs['solar_panels_count']} ချပ်\n"
+                            reply_text += f"☀️ *Solar:* {specs['solar_panels_count']} ချပ်\n"
                         
-                        reply_text += (
-                            f"\n💰 ခန့်မှန်းကုန်ကျစရိတ်: {ests['total_estimated']:,} ကျပ်\n"
-                            f"(စက်ပစ္စည်း၊ လက်ခ၊ ကြိုး၊ မီးပုံး အပြီးအစီး ခန့်မှန်းဈေးဖြစ်ပါတယ်ခင်ဗျ)"
-                        )
+                        reply_text += f"\n💰 *ခန့်မှန်းကုန်ကျစရိတ်:* {ests['total_estimated']:,} ကျပ်"
                         
                 except Exception as e:
-                    print(f"Tool parse error: {e}")
-                    reply_text = "မီးသုံးစွဲမှု တွက်ချက်ရာမှာ Error ဖြစ်သွားလို့ ပမာဏအတိအကျ (Watts) နဲ့ ပြန်ပြောပေးပါခင်ဗျာ။"
+                    print(f"Tool error: {e}")
+                    reply_text = "တွက်ချက်မှု Error ဖြစ်သွားပါတယ်။ Watts ပမာဏ အတိအကျပြန်ပြောပေးပါခင်ဗျာ။"
         
-        # 4. Save AI Response (Memory)
         save_chat_log(sender_id_str, "assistant", reply_text)
-        
-        # 5. Send Final Reply to Telegram
         send_telegram_message(sender_id, reply_text)
 
     except Exception as e:
-        print(f"Critical AI Error: {e}")
-        error_msg = "System error ဖြစ်နေလို့ ခဏနေမှ ပြန်မေးပေးပါခင်ဗျာ။ 🙏"
-        send_telegram_message(sender_id, error_msg)
+        print(f"Critical Error: {e}")
+        send_telegram_message(sender_id, "System Error ပါခင်ဗျာ။")
