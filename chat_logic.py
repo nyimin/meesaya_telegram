@@ -8,7 +8,6 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-# --- PERSONA DEFINITION (Q4 2025 Market) ---
 SYSTEM_PROMPT = """
 You are MeeSaya (မီးဆရာ), a professional Solar Consultant in Myanmar.
 Speak ONLY in Burmese (Burmese Language).
@@ -27,8 +26,7 @@ Speak ONLY in Burmese (Burmese Language).
 """
 
 def send_message(chat_id, text):
-    """Safe sender with Markdown fix"""
-    clean_text = text.replace("**", "*") # Fix telegram formatting
+    clean_text = text.replace("**", "*")
     payload = {"chat_id": chat_id, "text": clean_text, "parse_mode": "Markdown"}
     requests.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload)
 
@@ -38,7 +36,7 @@ def call_llm(messages, temperature=0.3):
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
             json={
-                "model": "google/gemini-2.0-flash-001", # Or 1.5-flash
+                "model": "google/gemini-2.0-flash-001", 
                 "messages": messages,
                 "temperature": temperature
             },
@@ -51,30 +49,23 @@ def call_llm(messages, temperature=0.3):
 
 def process_ai_message(chat_id, user_text):
     chat_id = str(chat_id)
-    
-    # 1. Get History & Context
     history = get_recent_history(chat_id)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": user_text}]
     
-    # 2. First Pass (Decision)
     ai_response = call_llm(messages)
     if not ai_response:
         return
 
-    # 3. Tool Execution Check
     tool_output_text = ""
     tool_data = None
     
     if "{" in ai_response and "tool" in ai_response:
         try:
-            # Extract JSON cleanly
             json_str = ai_response[ai_response.find("{"):ai_response.rfind("}")+1]
             tool_data = json.loads(json_str)
             
             if tool_data['tool'] == 'calculate':
-                # Run Calculator
                 res = calculate_system(tool_data['watts'], tool_data['hours'], tool_data.get('housing', 'home'))
-                
                 if "error" in res:
                     tool_output_text = f"Error: {res['error']}"
                 elif res['strategy'] == 'HOME_INSTALL':
@@ -94,23 +85,19 @@ def process_ai_message(chat_id, user_text):
                     )
 
             elif tool_data['tool'] == 'search':
-                # Run Search
                 items = search_products_db(tool_data['query'])
                 tool_output_text = "INVENTORY SEARCH RESULTS:\n" + "\n".join(items)
 
         except Exception as e:
             print(f"Tool Parsing Error: {e}")
 
-    # 4. Second Pass (If Tool was used, get final explanation)
     if tool_output_text:
-        # Feed the tool result back to the AI
         messages.append({"role": "assistant", "content": json.dumps(tool_data)})
         messages.append({"role": "system", "content": f"TOOL RESULT: {tool_output_text}. Now write the final helpful response in Burmese."})
         final_response = call_llm(messages, temperature=0.6)
     else:
         final_response = ai_response
 
-    # 5. Save & Send
     save_chat_log(chat_id, "user", user_text)
     save_chat_log(chat_id, "assistant", final_response)
     send_message(chat_id, final_response)

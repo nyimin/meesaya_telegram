@@ -1,10 +1,6 @@
 from database import get_db_connection
 
 def calculate_system(watts: int, hours: int, housing_type: str = "home"):
-    """
-    Matches user requirements to Standard Market Packages (Tiers A-E).
-    """
-    
     # Convert to kW/kWh for comparison
     raw_kw = watts / 1000.0
     raw_energy_kwh = (watts * hours) / 1000.0
@@ -14,7 +10,6 @@ def calculate_system(watts: int, hours: int, housing_type: str = "home"):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             
-            # STRATEGY 1: PORTABLE (For Apartments/Condos)
             if housing_type in ['apartment', 'condo', 'flat']:
                 cur.execute("""
                     SELECT name, inverter_kw, battery_kwh, est_price_low, description 
@@ -23,7 +18,6 @@ def calculate_system(watts: int, hours: int, housing_type: str = "home"):
                     AND inverter_kw >= %s
                     ORDER BY est_price_low ASC LIMIT 1
                 """, (raw_kw,))
-                
                 row = cur.fetchone()
                 if row:
                     match_found = {
@@ -34,16 +28,14 @@ def calculate_system(watts: int, hours: int, housing_type: str = "home"):
                         "desc": row[4]
                     }
 
-            # STRATEGY 2: HOME INSTALL (Tiers A, B, C)
             if not match_found:
-                # Assign Tier based on Logic
                 tier_target = 'A'
                 if raw_kw > 1.5 or raw_energy_kwh > 2.0:
-                    tier_target = 'B' # 3.5kW
+                    tier_target = 'B'
                 if raw_kw > 3.5 or raw_energy_kwh > 5.0:
-                    tier_target = 'C' # 6kW (Sweet Spot)
+                    tier_target = 'C'
                 if raw_kw > 6.5:
-                    tier_target = 'D' # Premium
+                    tier_target = 'D'
 
                 cur.execute("""
                     SELECT name, inverter_kw, battery_kwh, est_price_low, est_price_high, install_cost, description, system_voltage
@@ -51,13 +43,10 @@ def calculate_system(watts: int, hours: int, housing_type: str = "home"):
                     WHERE tier_code = %s
                     LIMIT 1
                 """, (tier_target,))
-                
                 row = cur.fetchone()
                 if row:
-                    # Calculate "Walk Away" Price (Hardware + Install)
                     total_low = row[3] + row[5]
                     total_high = row[4] + row[5]
-                    
                     match_found = {
                         "strategy": "HOME_INSTALL",
                         "tier_name": row[0],
