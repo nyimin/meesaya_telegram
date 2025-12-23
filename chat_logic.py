@@ -5,9 +5,9 @@ from database import save_chat_log, get_recent_history
 from calculator import calculate_system
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-ADMIN_ID = os.environ.get("ADMIN_TELEGRAM_ID")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
+# Telegram API Endpoint
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 # --- YOUR PERSONA DEFINITION ---
@@ -51,12 +51,11 @@ SYSTEM_INSTRUCTIONS = """
 FINAL_SYSTEM_PROMPT = PERSONA_DEFINITION + "\n" + SYSTEM_INSTRUCTIONS
 
 def send_telegram_message(chat_id, text):
-    """Sends a message back via Telegram API."""
+    """Sends a message back to Telegram."""
     url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text
-        # You can add "parse_mode": "Markdown" if you want formatted text
     }
     try:
         r = requests.post(url, json=payload)
@@ -68,11 +67,11 @@ def send_telegram_message(chat_id, text):
 def process_ai_message(sender_id, user_text):
     """
     1. Retrieve History
-    2. Call Google Gemini 2.5 Flash via OpenRouter
+    2. Call LLM
     3. Check for Tool Use (Calculator)
     4. Save & Reply
     """
-    # Ensure sender_id is a string for database consistency
+    # Ensure sender_id is string for database consistency
     sender_id_str = str(sender_id)
     
     # 1. Get Context
@@ -92,15 +91,15 @@ def process_ai_message(sender_id, user_text):
             json={
                 "model": "google/gemini-2.5-flash", 
                 "messages": messages,
-                "temperature": 0.3 
+                "temperature": 0.3 # Low temp for strict instructions
             }
         )
         result = response.json()
         
         if 'choices' not in result:
             print(f"LLM Error: {result}")
-            # Fallback text
-            reply_text = "စနစ်ပိုင်းဆိုင်ရာ အနည်းငယ် Error ရှိနေလို့ ခဏနေမှ ပြန်မေးပေးပါခင်ဗျာ။"
+            # Fallback
+            reply_text = "စနစ်ပိုင်းဆိုင်ရာ Error ရှိနေလို့ ခဏနေမှ ပြန်မေးပေးပါခင်ဗျာ။"
         else:
             ai_content = result['choices'][0]['message']['content']
             reply_text = ai_content 
@@ -144,7 +143,7 @@ def process_ai_message(sender_id, user_text):
         # 4. Save AI Response (Memory)
         save_chat_log(sender_id_str, "assistant", reply_text)
         
-        # 5. Send Final Reply
+        # 5. Send Final Reply to Telegram
         send_telegram_message(sender_id, reply_text)
 
     except Exception as e:
