@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request, BackgroundTasks
 from chat_logic import process_ai_message
+from database import init_pool, close_pool
 import os
-import requests
+import httpx
 import uvicorn
+import asyncio
 
 app = FastAPI()
 
@@ -11,14 +13,27 @@ APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL")
 
 @app.on_event("startup")
 async def startup_event():
-    if not TELEGRAM_BOT_TOKEN or not APP_PUBLIC_URL:
-        return
-    webhook_url = f"{APP_PUBLIC_URL}/webhook"
-    requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={webhook_url}")
+    # 1. Init DB Pool
+    await init_pool()
+    
+    # 2. Set Webhook
+    if TELEGRAM_BOT_TOKEN and APP_PUBLIC_URL:
+        webhook_url = f"{APP_PUBLIC_URL}/webhook"
+        # We can use httpx here too for consistency
+        async with httpx.AsyncClient() as client:
+            try:
+                await client.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url={webhook_url}")
+                print(f"✅ Webhook set to {webhook_url}")
+            except Exception as e:
+                print(f"❌ Webhook Error: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_pool()
 
 @app.get("/")
 def home():
-    return {"status": "MeeSaya Bot v2.0 (Sales Agent) Active"}
+    return {"status": "MeeSaya Bot v2.1 (Async + RAG) Active"}
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -33,11 +48,13 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
         text = msg.get("text", "")
         
         if chat_id and text:
-            # Process in background to avoid Telegram timeout
+            # Add async task to background
             background_tasks.add_task(process_ai_message, chat_id, text)
             
     return {"status": "ok"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    # 'workers' is for multiprocess, but for async usually 1 worker is enough for IO bound unless CPU bound.
+    # reload=True is good for dev.
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

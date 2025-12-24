@@ -1,0 +1,17 @@
+Category,Content
+News,Yangon rotational load shedding schedule is currently 4-hours ON and 4-hours OFF.
+News,Mandalay industrial zones are facing 6-hour power cuts effective December 1st.
+Troubleshooting,"Error 04 on Growatt Inverter indicates Low Battery Voltage. Check if battery is charged, check breaker."
+Troubleshooting,"Error 08 on Growatt Inverter indicates Bus Voltage High. Restart the inverter. If persistent, panels might be over-voltage."
+Troubleshooting,"Error 20 on Deye Inverter means Battery Communication Error. Check BMS cable and protocol settings (CAN/RS485)."
+Troubleshooting,"Inverter Fan Noise: It is normal for fans to run at high speed when charging over 30Amps. Ensure good ventilation."
+Market,"Solar panel prices (Dec 2024): Jinko/Longi 550W ~ 280,000 MMK. 600W Bifacial ~ 310,000 MMK."
+Market,"Lithium Battery Prices: 100Ah 48V (Rack) ~ 2,200,000 MMK. 200Ah 48V (Wall) ~ 4,500,000 MMK."
+Maintenance,"For Lead-Acid (Tubular) batteries, check distilled water levels every month. Do not let it dry out."
+Maintenance,"Clean solar panels every 2-3 weeks in dry season to maintain efficiency. Dust can reduce output by 15%."
+General,"Standard grid voltage in Myanmar fluctuates between 160V and 260V. Servo stabilizer recommended."
+General,"For 3kW systems, usually a 24V battery bank is used. For 5kW and above, 48V system is standard."
+Glossary,"DoD (Depth of Discharge): How much energy you use. Lithium can handle 80-90% DoD. Lead Acid only 50% DoD."
+Glossary,"Hybrid Inverter: Can mix Solar, Grid, and Battery. Can work without Grid. Best for Myanmar."
+Policy,"Grid Feed-in is generally not allowed in residential areas using standard analog meters (it spins backwards)."
+product_manual,"Growatt SPF 5000 ES: Max PV Input 450V. Max Charging 100A. Works without battery (but not recommended for unstable grid)."
