@@ -4,3 +4,7 @@ requests
 psycopg2-binary
 python-dotenv
 gunicorn
+alembic
+asyncpg
+httpx
+numpy
