@@ -39,7 +39,7 @@ async def send_message(chat_id, text):
 async def call_llm(messages, temperature=0.3):
     try:
         # Using Gemini 2.0 Flash Lite Preview as requested
-        model = "google/gemini-2.0-flash-lite-preview-02-05:free" 
+        model = "google/gemini-2.5-flash-lite" 
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
