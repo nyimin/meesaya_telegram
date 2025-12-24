@@ -12,6 +12,7 @@ COPY . .
 ENV PORT=8000
 EXPOSE $PORT
 
-# 1. Initialize DB (Create tables/Seed data)
-# 2. Start Server on the correct PORT
-CMD sh -c "python init_db.py && uvicorn main:app --host 0.0.0.0 --port ${PORT}"
+# 1. Run Migrations
+# 2. Seed Data (optional, but good for fresh install)
+# 3. Start Server
+CMD sh -c "alembic upgrade head && python seed_data.py && uvicorn main:app --host 0.0.0.0 --port ${PORT}"
